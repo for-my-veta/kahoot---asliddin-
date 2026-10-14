@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kahoot от Аслиддина</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background-color: #46178f; color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 15px; }
+    .container { background: white; color: #333; width: 100%; max-width: 600px; border-radius: 14px; padding: 25px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); text-align: center; }
+    h1 { font-size: 26px; margin-bottom: 10px; color: #46178f; }
+    .author { font-size: 14px; color: #666; margin-bottom: 20px; font-weight: bold; }
+    input, button { width: 100%; padding: 14px; font-size: 16px; margin: 10px 0; border-radius: 8px; border: 1px solid #ccc; outline: none; }
+    button { background-color: #46178f; color: white; font-weight: bold; border: none; cursor: pointer; transition: opacity 0.2s; }
+    button:hover { opacity: 0.9; }
+    .options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+    .btn { border: none; padding: 20px; font-size: 16px; font-weight: bold; color: white; border-radius: 8px; cursor: pointer; min-height: 90px; }
+    .btn-0 { background-color: #e21b3c; }
+    .btn-1 { background-color: #1368ce; }
+    .btn-2 { background-color: #d89e00; }
+    .btn-3 { background-color: #26890c; }
+    .timer { font-size: 22px; font-weight: bold; color: #e21b3c; margin: 10px 0; }
+    .hidden { display: none !important; }
+    .player-list { text-align: left; max-height: 150px; overflow-y: auto; background: #f4f4f4; padding: 10px; border-radius: 6px; margin: 10px 0; }
+  </style>
+</head>
+<body>
+
+  <div class="container" id="app">
+    <div id="screen-home">
+      <h1>Kahoot Викторина</h1>
+      <div class="author">От Аслиддина</div>
+      <input type="text" id="input-name" placeholder="Ваше имя (никнейм)">
+      <input type="text" id="input-pin" placeholder="PIN-код комнаты (например: 1234)">
+      <button onclick="hostGame()">Создать комнату (Ведущий)</button>
+      <button onclick="joinGame()" style="background-color: #1368ce;">Войти в игру (Игрок)</button>
+    </div>
+
+    <div id="screen-lobby" class="hidden">
+      <h1>Лобби игры</h1>
+      <p>PIN-код для друзей: <b id="display-pin" style="font-size: 24px; color: #e21b3c;"></b></p>
+      <p style="margin-top: 15px;">Подключившиеся игроки:</p>
+      <div class="player-list" id="player-list">Ожидание игроков...</div>
+      <button onclick="startQuiz()" style="background-color: #26890c;">Начать викторину!</button>
+    </div>
+
+    <div id="screen-question" class="hidden">
+      <div class="timer" id="timer">Осталось: 15с</div>
+      <h2 id="question-text" style="font-size: 20px; margin-bottom: 15px; color: #222;">Вопрос...</h2>
+      <div class="options-grid" id="options-container"></div>
+    </div>
+
+    <div id="screen-result" class="hidden">
+      <h1>Игра завершена! 🎉</h1>
+      <p id="final-score" style="font-size: 22px; margin: 20px 0;"></p>
+      <button onclick="location.reload()">В начало</button>
+    </div>
+  </div>
+
+  <script>
+    const firebaseConfig = {
+      databaseURL: "https://kahoot-asliddin-default-rtdb.firebaseio.com/"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const quizData = [
+      { question: "Какая планета ближе всего к Солнцу?", options: ["Венера", "Меркурий", "Марс", "Земля"], correct: 1 },
+      { question: "Сколько дней в невисокосном году?", options: ["365", "366", "360", "364"], correct: 0 },
+      { question: "Какой цвет при смешивании синего и желтого?", options: ["Фиолетовый", "Оранжевый", "Зеленый", "Коричневый"], correct: 2 },
+      { question: "Столица Японии?", options: ["Пекин", "Сеул", "Токио", "Киото"], correct: 2 },
+      { question: "Самый большой океан на Земле?", options: ["Атлантический", "Индийский", "Тихий", "Северный Ледовитый"], correct: 2 },
+      { question: "Сколько лап у паука?", options: ["6", "8", "10", "12"], correct: 1 },
+      { question: "Какая химическая формула воды?", options: ["CO2", "H2O", "O2", "NaCl"], correct: 1 },
+      { question: "В каком году человек полетел в космос?", options: ["1957", "1961", "1969", "1981"], correct: 1 },
+      { question: "Какая гора самая высокая в мире?", options: ["Эльбрус", "Килиманджаро", "Эверест", "Монблан"], correct: 2 },
+      { question: "Сколько континентов на Земле?", options: ["5", "6", "7", "8"], correct: 2 },
+      { question: "Какая страна имеет форму сапога?", options: ["Испания", "Греция", "Италия", "Франция"], correct: 2 },
+      { question: "Какой газ преобладает в атмосфере Земли?", options: ["Кислород", "Углекислый газ", "Азот", "Водород"], correct: 2 },
+      { question: "Кто написал «Преступление и наказание»?", options: ["Толстой", "Пушкин", "Достоевский", "Чехов"], correct: 2 },
+      { question: "Какое число является простым?", options: ["4", "6", "9", "7"], correct: 3 },
+      { question: "Сколько струн у классической гитары?", options: ["5", "6", "7", "8"], correct: 1 }
+    ];
+
+    let currentPin = "";
+    let myName = "";
+    let isHost = false;
+    let myScore = 0;
+
+    function hostGame() {
+      myName = document.getElementById("input-name").value.trim();
+      currentPin = document.getElementById("input-pin").value.trim();
+      if (!myName || !currentPin) { alert("Введите имя и PIN!"); return; }
+      isHost = true;
+      db.ref("rooms/" + currentPin).set({ status: "lobby", questionIndex: 0, host: myName });
+      document.getElementById("screen-home").classList.add("hidden");
+      document.getElementById("screen-lobby").classList.remove("hidden");
+      document.getElementById("display-pin").textContent = currentPin;
+
+      db.ref("rooms/" + currentPin + "/players").on("value", (snapshot) => {
+        const players = snapshot.val();
+        const listEl = document.getElementById("player-list");
+        if (!players) { listEl.innerHTML = "Ожидание игроков..."; return; }
+        listEl.innerHTML = Object.keys(players).map(name => `<div>👤 ${name}</div>`).join("");
+      });
+    }
+
+    function joinGame() {
+      myName = document.getElementById("input-name").value.trim();
+      currentPin = document.getElementById("input-pin").value.trim();
+      if (!myName || !currentPin) { alert("Введите имя и PIN!"); return; }
+      isHost = false;
+
+      db.ref("rooms/" + currentPin).once("value", (snapshot) => {
+        if (!snapshot.exists()) { alert("Комната с таким PIN не найдена!"); return; }
+        db.ref("rooms/" + currentPin + "/players/" + myName).set({ score: 0 });
+        document.getElementById("screen-home").classList.add("hidden");
+        document.getElementById("screen-question").classList.remove("hidden");
+        document.getElementById("question-text").textContent = "Ожидание начала игры...";
+
+        db.ref("rooms/" + currentPin).on("value", (snap) => {
+          const data = snap.val();
+          if (!data) return;
+          if (data.status === "playing") { showQuestion(data.questionIndex); }
+          else if (data.status === "finished") {
+            document.getElementById("screen-question").classList.add("hidden");
+            document.getElementById("screen-result").classList.remove("hidden");
+            document.getElementById("final-score").textContent = `Ваш счет: ${myScore}`;
+          }
+        });
+      });
+    }
+
+    function startQuiz() {
+      db.ref("rooms/" + currentPin).update({ status: "playing", questionIndex: 0 });
+      runHostLoop(0);
+    }
+
+    function runHostLoop(qIdx) {
+      if (qIdx < quizData.length) {
+        db.ref("rooms/" + currentPin).update({ questionIndex: qIdx });
+        setTimeout(() => { runHostLoop(qIdx + 1); }, 15000);
+      } else {
+        db.ref("rooms/" + currentPin).update({ status: "finished" });
+      }
+    }
+
+    function showQuestion(qIndex) {
+      const q = quizData[qIndex];
+      if (!q) return;
+      document.getElementById("screen-question").classList.remove("hidden");
+      document.getElementById("question-text").textContent = `Вопрос ${qIndex + 1}/15: ${q.question}`;
+      const container = document.getElementById("options-container");
+      container.innerHTML = "";
+
+      q.options.forEach((opt, idx) => {
+        const btn = document.createElement("button");
+        btn.className = `btn btn-${idx}`;
+        btn.textContent = opt;
+        btn.onclick = () => answerSelected(idx, q.correct);
+        container.appendChild(btn);
+      });
+
+      let timeLeft = 15;
+      const timerEl = document.getElementById("timer");
+      timerEl.textContent = `Осталось: ${timeLeft}с`;
+      if (window.activeTimer) clearInterval(window.activeTimer);
+      window.activeTimer = setInterval(() => {
+        timeLeft--;
+        timerEl.textContent = `Осталось: ${timeLeft}с`;
+        if (timeLeft <= 0) clearInterval(window.activeTimer);
+      }, 1000);
+    }
+
+    function answerSelected(selectedIdx, correctIdx) {
+      const buttons = document.querySelectorAll(".options-grid button");
+      buttons.forEach(b => b.disabled = true);
+      if (selectedIdx === correctIdx) {
+        myScore += 100;
+        buttons[selectedIdx].style.border = "4px solid white";
+      } else {
+        buttons[selectedIdx].style.opacity = "0.4";
+        buttons[correctIdx].style.border = "4px solid white";
+      }
+    }
+  </script>
+</body>
+</html>
